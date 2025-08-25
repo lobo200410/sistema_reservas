@@ -1,0 +1,9 @@
+# Deshabilitar listado de directorios en la raíz
+Options -Indexes
+
+DirectoryIndex admin/dashboard.php
+
+# Forzar redirección a dashboard.php
+RewriteEngine On
+RewriteCond %{REQUEST_URI} ^/reservas/?$ [NC]
+RewriteRule ^.*$ /reservas/admin/dashboard.php [L,R=302]
