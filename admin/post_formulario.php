@@ -4,17 +4,41 @@ include("../conexion.php");
 date_default_timezone_set('America/El_Salvador');
 
 // Solo admin
-if (!isset($_SESSION["rol"]) || $_SESSION["rol"] !== "admin") {
-  exit('<div class="p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">Acceso denegado.</div>');
+$rol = strtolower(trim($_SESSION['rol'] ?? '')); // normaliza
+
+if ($rol !== 'admin' && $rol !== 'multimedia') {
+    header("Location: ../login.php");
+    exit;
 }
 
-// Contexto opcional (si lo llamas desde una reserva y/o con fecha ya filtrada)
+
 $reservation_id = isset($_GET['reservation_id']) ? (int)$_GET['reservation_id'] : null;
 $fecha_ctx      = $_GET['fecha'] ?? ''; // fecha de contexto para volver si no cambias la fecha en el form
 
 $err = "";
 
-// Guardar
+
+$staff = [];
+$sqlStaff = "
+  SELECT CONCAT(u.nombre,' ',u.apellido) AS nombre_completo
+  FROM users u
+  WHERE u.role_id IN (1,3)
+  ORDER BY u.nombre, u.apellido
+";
+if ($res = $conn->query($sqlStaff)) {
+  while ($row = $res->fetch_assoc()) { $staff[] = $row; }
+  $res->free();
+}
+// lista de nombres válidos para validar POST
+$nombres_validos = array_map(fn($r) => $r['nombre_completo'], $staff);
+
+// para que el form recuerde selección si hay error
+$filmado_por_sel = $_POST['filmado_por']  ?? '';
+$editado_por_sel = $_POST['editado_por']  ?? '';
+
+/* =========================
+   2) Guardar
+   ========================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $reservation_id    = ($_POST['reservation_id'] ?? '') !== '' ? (int)$_POST['reservation_id'] : null;
   $numero_videos     = (int)($_POST['numero_videos'] ?? 0);
@@ -25,14 +49,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $firma_data        = $_POST['firma_data'] ?? "";
 
   // Validaciones
-  if ($numero_videos <= 0)                         $err = "Ingresa el número de videos (mayor a cero).";
-  elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_publicacion)) $err = "Fecha de publicación inválida.";
-  elseif ($filmado_por === "")                     $err = "Ingresa el nombre de quien filmó.";
-  elseif ($editado_por === "")                     $err = "Ingresa el nombre de quien editó.";
-  elseif (strpos($firma_data, "data:image/") !== 0)$err = "Debes firmar en el recuadro.";
+  if ($numero_videos <= 0) {
+    $err = "Ingresa el número de videos (mayor a cero).";
+  } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_publicacion)) {
+    $err = "Fecha de publicación inválida.";
+  } elseif ($filmado_por === "" || !in_array($filmado_por, $nombres_validos, true)) {
+    $err = "Selecciona quién filmó (opción válida).";
+  } elseif ($editado_por === "" || !in_array($editado_por, $nombres_validos, true)) {
+    $err = "Selecciona quién editó (opción válida).";
+  } elseif (strpos($firma_data, "data:image/") !== 0) {
+    $err = "Debes firmar en el recuadro.";
+  }
 
   if (!$err) {
-    // Inserta según tu tabla real
+    // Inserta (guardamos texto para filmado_por / editado_por)
     $sql = "INSERT INTO postfilms
             (reservation_id, numero_videos, fecha_publicacion, filmado_por, editado_por, comentario, firma)
             VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -65,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Registro de Post‑Grabación</title>
+  <title>Registro de Post-Grabación</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -73,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="bg-gray-50 text-gray-900">
   <main class="max-w-4xl mx-auto px-4 py-6">
     <div class="mb-5">
-      <h1 class="text-xl font-semibold">Registro de Post‑Grabación</h1>
+      <h1 class="text-xl font-semibold">Registro de Post-Grabación</h1>
       <p class="text-sm text-gray-500">Completa los campos y firma para guardar.</p>
     </div>
 
@@ -103,20 +133,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  class="mt-1 w-full h-10 rounded-lg border-gray-300 bg-white px-3 text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400">
         </div>
 
-        <!-- Filmado por -->
+        <!-- Filmado por (selector) -->
         <div>
           <label class="block text-sm font-medium text-gray-700">Filmado por</label>
-          <input type="text" name="filmado_por" required
-                 class="mt-1 w-full h-10 rounded-lg border-gray-300 bg-white px-3 text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
-                 placeholder="Nombre de la persona que filmó">
+          <select name="filmado_por" required
+                  class="mt-1 w-full h-10 rounded-lg border-gray-300 bg-white px-3 text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400">
+            <option value="">— Selecciona —</option>
+            <?php foreach ($staff as $p):
+              $n = $p['nombre_completo']; ?>
+              <option value="<?= htmlspecialchars($n) ?>" <?= ($filmado_por_sel === $n ? 'selected' : '') ?>>
+                <?= htmlspecialchars($n) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
         </div>
 
-        <!-- Editado por -->
+        <!-- Editado por (selector) -->
         <div>
           <label class="block text-sm font-medium text-gray-700">Editado por</label>
-          <input type="text" name="editado_por" required
-                 class="mt-1 w-full h-10 rounded-lg border-gray-300 bg-white px-3 text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
-                 placeholder="Nombre de la persona que editó">
+          <select name="editado_por" required
+                  class="mt-1 w-full h-10 rounded-lg border-gray-300 bg-white px-3 text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400">
+            <option value="">— Selecciona —</option>
+            <?php foreach ($staff as $p):
+              $n = $p['nombre_completo']; ?>
+              <option value="<?= htmlspecialchars($n) ?>" <?= ($editado_por_sel === $n ? 'selected' : '') ?>>
+                <?= htmlspecialchars($n) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
         </div>
 
         <!-- Comentario -->

@@ -5,9 +5,13 @@ include("../conexion.php");
 // Establecer zona horaria del servidor para evitar desfases de fecha
 date_default_timezone_set('America/El_Salvador');
 
-if (!isset($_SESSION["rol"]) || $_SESSION["rol"] !== "admin") {
-  exit('<div class="p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">Acceso denegado.</div>');
+$rol = strtolower(trim($_SESSION['rol'] ?? '')); // normaliza
+
+if ($rol !== 'admin' && $rol !== 'multimedia') {
+    header("Location: ../login.php");
+    exit;
 }
+
 
 // Determinar la fecha a filtrar (GET o fecha actual)
 $fecha_filtrada = isset($_GET['fecha']) && $_GET['fecha'] !== '' ? $_GET['fecha'] : date('Y-m-d');

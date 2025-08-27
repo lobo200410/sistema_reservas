@@ -3,9 +3,13 @@ session_start();
 include("../conexion.php");
 
 // Sólo admins
-if ($_SESSION['rol'] !== 'admin') {
-    header('Location: ../login.php');
-    exit;
+if (!isset($_SESSION['rol'])) {
+  header('Location: ../login.php'); exit;
+}
+
+$rol = strtolower(trim($_SESSION['rol'])); // normaliza
+if ($rol !== 'admin' && $rol !== 'multimedia') {
+  header('Location: ../login.php'); exit;
 }
 
 // Fecha del filtro (GET) o hoy por defecto

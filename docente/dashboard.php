@@ -35,7 +35,7 @@ $nombreCompleto = $_SESSION["nombre"];
     }
   </script>
 
-  <!-- Iconos -->
+  
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
   <link rel="icon" href="img/1.png" type="image/x-icon">
 </head>
@@ -48,15 +48,19 @@ $nombreCompleto = $_SESSION["nombre"];
         <!-- Brand -->
         <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-2xl bg-brand-600 text-white grid place-items-center">
-              <i class="fa-solid fa-clapperboard"></i>
-            </div>
-            <div>
-              <p class="font-semibold leading-tight">Sala de Video</p>
-              <p class="text-xs text-gray-500">Panel Docente</p>
+            <!-- Contenedor del logo -->
+            <img src="img/1.png" alt="Logo" class="h-8 w-auto">
+
+            <!-- Texto -->
+            <div class="leading-tight">
+              <p class="text-sm font-semibold text-gray-800">Sala de Video</p>
+              <p class="text-xs text-gray-500">Panel docente</p>
             </div>
           </div>
-          <button id="closeSidebar" class="md:hidden w-10 h-10 grid place-items-center rounded-lg hover:bg-gray-100" aria-label="Cerrar menú">
+
+          <button id="closeSidebar"
+            class="md:hidden w-10 h-10 grid place-items-center rounded-lg hover:bg-gray-100"
+            aria-label="Cerrar menú">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>

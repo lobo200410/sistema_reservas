@@ -1,173 +1,225 @@
 <?php
-require_once '../vendor/autoload.php';
+
+session_start();
 require_once '../conexion.php';
+require_once '../vendor/autoload.php';
+
+if (!isset($_SESSION['rol']) || $_SESSION['rol'] !== 'admin') {
+  exit('Acceso denegado.');
+}
+
+date_default_timezone_set('America/El_Salvador');
+
+$anio   = isset($_POST['anio']) ? (int)$_POST['anio'] : 0;
+$estado = isset($_POST['estado']) ? trim($_POST['estado']) : '';
+
+if ($anio < 2000 || $anio > 2100) {
+  exit('Año inválido.');
+}
+
+
+$facus = [];
+$qr = $conn->query("SELECT id, nombre FROM facultades ORDER BY id ASC");
+while ($f = $qr->fetch_assoc()) {
+  $facus[(int)$f['id']] = $f['nombre'];
+}
+
+
+$meses = [1=>'Enero',2=>'Febrero',3=>'Marzo',4=>'Abril',5=>'Mayo',6=>'Junio',
+          7=>'Julio',8=>'Agosto',9=>'Sept.',10=>'Oct.',11=>'Nov.',12=>'Dic.'];
+
+$tabla   = [];
+$totFila = [];
+$totMes  = array_fill(1, 12, 0);
+foreach ($facus as $fid => $n) {
+  $tabla[$fid]   = array_fill(1, 12, 0);
+  $totFila[$fid] = 0;
+}
+
+
+$baseSQL = "
+  SELECT facultad_id, MONTH(fecha_reserva) AS m, COUNT(*) AS c
+  FROM reservations
+  WHERE YEAR(fecha_reserva) = ?
+";
+$params = [$anio];
+$types  = 'i';
+
+if ($estado !== '') {
+  $baseSQL .= " AND estado = ? ";
+  $types   .= 's';
+  $params[] = $estado;
+}
+$baseSQL .= " GROUP BY facultad_id, MONTH(fecha_reserva)";
+
+$stmt = $conn->prepare($baseSQL);
+$stmt->bind_param($types, ...$params);
+$stmt->execute();
+$rs = $stmt->get_result();
+
+while ($row = $rs->fetch_assoc()) {
+  $fid = (int)$row['facultad_id'];
+  $m   = (int)$row['m'];
+  $c   = (int)$row['c'];
+  if (isset($tabla[$fid][$m])) {
+    $tabla[$fid][$m] += $c;
+    $totFila[$fid]   += $c;
+    $totMes[$m]      += $c;
+  }
+}
+$granTotal = array_sum($totMes);
+
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 
-// === Parámetros ===
-$anio = isset($_GET['anio']) && preg_match('/^\d{4}$/', $_GET['anio']) ? (int)$_GET['anio'] : (int)date('Y');
+$ss = new Spreadsheet();
+$sheet = $ss->getActiveSheet();
 
-// === Traer datos agregados: conteos por facultad y mes ===
-$sql = "
-  SELECT COALESCE(f.nombre, 'Otros') AS facultad,
-         MONTH(r.fecha_reserva) AS mes,
-         COUNT(*) AS cnt
-  FROM reservations r
-  LEFT JOIN facultades f ON r.facultad_id = f.id
-  WHERE YEAR(r.fecha_reserva) = ?
-  GROUP BY COALESCE(f.nombre, 'Otros'), MONTH(r.fecha_reserva)
-  ORDER BY facultad ASC
-";
-$stmt = $conn->prepare($sql);
-$stmt->bind_param('i', $anio);
-$stmt->execute();
-$res = $stmt->get_result();
 
-// Construir matriz: facultad -> [1..12] = 0
-$matriz = [];
-while ($row = $res->fetch_assoc()) {
-  $fac = $row['facultad'] ?: 'Otros';
-  $mes = (int)$row['mes'];
-  $cnt = (int)$row['cnt'];
-  if (!isset($matriz[$fac])) $matriz[$fac] = array_fill(1, 12, 0);
-  if ($mes >= 1 && $mes <= 12) $matriz[$fac][$mes] = $cnt;
-}
-$stmt->close();
+$colFin = 'N';
 
-// Si no hay datos, crear al menos una fila
-if (empty($matriz)) {
-  $matriz['—'] = array_fill(1, 12, 0);
-}
 
-// Ordenar filas por nombre (puedes cambiar a orden personalizado si quieres)
-ksort($matriz, SORT_NATURAL | SORT_FLAG_CASE);
+$sheet->setCellValue('A1', 'Universidad Tecnológica de El Salvador');
+$sheet->mergeCells("A1:$colFin"."1");
+$sheet->getStyle('A1')->getFont()->setBold(true)->setItalic(true)->setSize(18);
+$sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-// Totales por mes
-$totalesMes = array_fill(1, 12, 0);
-foreach ($matriz as $fac => $arrMeses) {
-  for ($m = 1; $m <= 12; $m++) $totalesMes[$m] += (int)$arrMeses[$m];
-}
-$granTotal = array_sum($totalesMes);
+$sheet->setCellValue('A2', 'DIRECCIÓN DE EDUCACIÓN VIRTUAL');
+$sheet->mergeCells("A2:$colFin"."2");
+$sheet->getStyle('A2')->getFont()->setBold(true)->setSize(12);
+$sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-// Nombres de meses (cortos)
-$mesN = [1=>'Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Sept.','Oct.','Nov.','Dic.'];
+$sheet->setCellValue('A3', 'Estadístico por áreas de toma de videos (Facultades-Administrativos)');
+$sheet->mergeCells("A3:$colFin"."3");
+$sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-// === Spreadsheet ===
-$spreadsheet = new Spreadsheet();
-$sheet = $spreadsheet->getActiveSheet();
-$sheet->setTitle("Estadístico $anio");
+$sheet->setCellValue('A4', "Año $anio");
+$sheet->mergeCells("A4:$colFin"."4");
+$sheet->getStyle('A4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-// Márgenes/estética rápida
-$sheet->getDefaultColumnDimension()->setWidth(10);
-$sheet->getColumnDimension('A')->setWidth(38); // Facultad y/otros
-$sheet->getColumnDimension('N')->setWidth(10);
 
-// Fila base (iremos sumando)
-$row = 1;
-
-// Encabezado superior (títulos)
-$sheet->mergeCells("A{$row}:N{$row}");
-$sheet->setCellValue("A{$row}", "Universidad Tecnológica de El Salvador");
-$sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(14);
-$row++;
-
-$sheet->mergeCells("A{$row}:N{$row}");
-$sheet->setCellValue("A{$row}", "DIRECCIÓN DE EDUCACIÓN VIRTUAL");
-$sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(12);
-$row++;
-
-$sheet->mergeCells("A{$row}:N{$row}");
-$sheet->setCellValue("A{$row}", "Estadístico por áreas de toma de videos (Facultades-Administrativos)");
-$sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$row}")->getFont()->setSize(11);
-$row++;
-
-$sheet->mergeCells("A{$row}:N{$row}");
-$sheet->setCellValue("A{$row}", "Año {$anio}");
-$sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(11);
-$row += 1;
-
-// Encabezado de la tabla
-$headRow = $row;
-$sheet->setCellValue("A{$headRow}", "Facultad y/otros");
+$headRow = 6;
+$sheet->setCellValue("A$headRow", "Facultad y/otros");
 $col = 'B';
-for ($m = 1; $m <= 12; $m++, $col++) {
-  $sheet->setCellValue("{$col}{$headRow}", $mesN[$m]);
+for ($m=1;$m<=12;$m++) {
+  $sheet->setCellValue($col.$headRow, $meses[$m]);
+  $col++;
 }
-$sheet->setCellValue("N{$headRow}", "Total");
+$sheet->setCellValue("N$headRow", "Total");
 
-// Estilo encabezado
-$sheet->getStyle("A{$headRow}:N{$headRow}")->getFont()->setBold(true);
-$sheet->getStyle("A{$headRow}:N{$headRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$headRow}:N{$headRow}")
-      ->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F3F4F6');
 
-$row++;
+$sheet->getStyle("A$headRow:$colFin$headRow")->getFont()->setBold(true);
+$sheet->getStyle("A$headRow:$colFin$headRow")->getAlignment()
+      ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+      ->setVertical(Alignment::VERTICAL_CENTER);
 
-// Cuerpo (filas por facultad)
-$startDataRow = $row;
-foreach ($matriz as $facultad => $arrMeses) {
-  $sheet->setCellValue("A{$row}", $facultad);
-  $col = 'B';
-  $subtotal = 0;
-  for ($m = 1; $m <= 12; $m++, $col++) {
-    $val = (int)$arrMeses[$m];
-    $sheet->setCellValue("{$col}{$row}", $val);
-    $subtotal += $val;
-  }
-  $sheet->setCellValue("N{$row}", $subtotal);
-  $row++;
-}
-$endDataRow = $row - 1;
 
-// Fila “Total del mes”
-$sheet->setCellValue("A{$row}", "Total del mes");
-$sheet->getStyle("A{$row}")->getFont()->setBold(true);
-$col = 'B';
-for ($m = 1; $m <= 12; $m++, $col++) {
-  $sheet->setCellValue("{$col}{$row}", (int)$totalesMes[$m]);
-  $sheet->getStyle("{$col}{$row}")->getFont()->setBold(true);
-}
-$sheet->setCellValue("N{$row}", (int)$granTotal);
-$sheet->getStyle("N{$row}")->getFont()->setBold(true);
-$row++;
+$sheet->getStyle("A$headRow:$colFin$headRow")->getFill()->setFillType(Fill::FILL_SOLID)
+      ->getStartColor()->setARGB('FFEFEFEF');
 
-// Texto total anual debajo
-$sheet->mergeCells("A{$row}:N{$row}");
-$sheet->setCellValue("A{$row}", "Total, de videos del año {$anio}: " . number_format($granTotal, 0, '.', ','));
-$sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("A{$row}")->getFont()->setBold(true);
-$row++;
 
-// Bordes para toda la tabla (encabezado + datos + totales)
-$sheet->getStyle("A{$headRow}:N" . ($row-1))->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+$sheet->getStyle("A$headRow:$colFin$headRow")->getBorders()->getAllBorders()
+      ->setBorderStyle(Border::BORDER_THIN);
 
-// Alineaciones
-$sheet->getStyle("B{$startDataRow}:N{$endDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("B{$headRow}:N{$headRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-$sheet->getStyle("B" . ($endDataRow+1) . ":N" . ($endDataRow+1))->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-// Ajustes de texto en la primera columna
-$sheet->getStyle("A{$startDataRow}:A{$endDataRow}")->getAlignment()->setWrapText(true);
 $sheet->getRowDimension($headRow)->setRowHeight(22);
 
-// (Opcional) un poquito de padding visual arriba
-$sheet->getRowDimension(1)->setRowHeight(20);
 
-// === Enviar al navegador ===
-$filename = "Estadistico_por_areas_{$anio}.xlsx";
+$row = $headRow + 1;
+$firstDataRow = $row;
+$i = 0;
+foreach ($facus as $fid => $nombreF) {
+  $sheet->setCellValue("A$row", $nombreF);
+
+  $col = 'B'; $rowTotal = 0;
+  for ($m=1;$m<=12;$m++) {
+    $val = $tabla[$fid][$m] ?? 0;
+    $sheet->setCellValue($col.$row, $val);
+    $rowTotal += $val;
+    $col++;
+  }
+  $sheet->setCellValue("N$row", $rowTotal);
+
+ 
+  $sheet->getStyle("A$row:$colFin$row")->getBorders()->getAllBorders()
+        ->setBorderStyle(Border::BORDER_THIN);
+
+
+  $sheet->getStyle("B$row:N$row")->getAlignment()
+        ->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+  
+  if ($i % 2 === 1) {
+    $sheet->getStyle("A$row:$colFin$row")->getFill()->setFillType(Fill::FILL_SOLID)
+          ->getStartColor()->setARGB('FFF9F9F9');
+  }
+  $i++;
+  $row++;
+}
+
+
+$sheet->setCellValue("A$row", "Total del mes");
+$sheet->getStyle("A$row")->getFont()->setBold(true);
+
+$col = 'B';
+for ($m=1;$m<=12;$m++) {
+  $sheet->setCellValue($col.$row, $totMes[$m]);
+  $col++;
+}
+$sheet->setCellValue("N$row", $granTotal);
+
+$sheet->getStyle("A$row:$colFin$row")->getFont()->setBold(true);
+$sheet->getStyle("A$row:$colFin$row")->getBorders()->getAllBorders()
+      ->setBorderStyle(Border::BORDER_THIN);
+$sheet->getStyle("B$row:N$row")->getAlignment()
+      ->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+
+$notaRow = $row + 2; 
+$textoTotal = "Total de videos del año $anio: " . number_format($granTotal, 0, '.', ',');
+$sheet->setCellValue("A$notaRow", $textoTotal);
+$sheet->mergeCells("A$notaRow:$colFin$notaRow");
+$sheet->getStyle("A$notaRow")->getFont()->setBold(true)->setSize(12);
+$sheet->getStyle("A$notaRow")->getAlignment()
+      ->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+
+$sheet->getColumnDimension('A')->setWidth(42);
+foreach (range('B','N') as $c) { $sheet->getColumnDimension($c)->setWidth(9); }
+$sheet->getStyle("A{$firstDataRow}:A$row")->getAlignment()->setWrapText(true);
+
+$sheet->freezePane('B'.($headRow+1));
+
+
+$sheet->getPageSetup()
+      ->setOrientation(PageSetup::ORIENTATION_LANDSCAPE) 
+      ->setPaperSize(PageSetup::PAPERSIZE_LETTER)        
+      ->setFitToWidth(1)                                 
+      ->setFitToHeight(0);                               
+
+$sheet->getPageMargins()->setTop(0.4);
+$sheet->getPageMargins()->setBottom(0.4);
+$sheet->getPageMargins()->setLeft(0.3);
+$sheet->getPageMargins()->setRight(0.3);
+
+
+$sheet->getPageSetup()->setHorizontalCentered(true);
+
+
+$ultimaFilaImprimir = $notaRow;
+$sheet->getPageSetup()->setPrintArea("A1:$colFin$ultimaFilaImprimir");
+
+
+$sheet->getStyle("A$headRow:$colFin$row")->getBorders()->getOutline()
+      ->setBorderStyle(Border::BORDER_MEDIUM);
+
+$nombre = "reporte_anual_facultades_$anio".($estado? "_$estado":'').".xlsx";
 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-header('Content-Disposition: attachment;filename="'.$filename.'"');
-header('Cache-Control: max-age=0');
-
-$writer = new Xlsx($spreadsheet);
+header('Content-Disposition: attachment; filename="'.$nombre.'"');
+$writer = new Xlsx($ss);
 $writer->save('php://output');
 exit;

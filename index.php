@@ -10,7 +10,7 @@ echo "<p><a href='cerrar_sesion.php'>Cerrar sesión</a></p>";
 
 if ($_SESSION["rol"] === "docente") {
     echo "<a href='reserva.php'>Reservar video</a>";
-} elseif ($_SESSION["rol"] === "admin") {
+} elseif ($usuario["rol"] === "admin" || $usuario["rol"] === "multimedia") {
     echo "<a href='admin_dashboard.php'>Panel de administración</a>";
 }
 ?>
