@@ -1,17 +1,25 @@
 <?php
-// editar_reserva.php
+// editar_reserva.php (adaptado a horarios value: "HH:MM-HH:MM|salaId")
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 if (session_status() === PHP_SESSION_NONE) session_start();
 include("../conexion.php");
 date_default_timezone_set('America/El_Salvador');
 
+// --- Auth / contexto ---
 $rol      = strtolower($_SESSION['rol'] ?? '');
 $usuario  = $_SESSION['nombre_usuario'] ?? '';
 $id       = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
-$back     = $_GET['back']  ?? ($_POST['back']  ?? 'docente');            // 'docente' | 'dashboard'
-$vista    = $_GET['vista'] ?? ($_POST['vista'] ?? 'mis_reservas');       // para volver al lugar correcto
+$back     = $_GET['back']  ?? ($_POST['back']  ?? 'docente');   // 'docente' | 'dashboard'
+$vista    = $_GET['vista'] ?? ($_POST['vista'] ?? 'mis_reservas');
 $fechaRet = $_GET['fecha'] ?? ($_POST['fecha'] ?? '');
 
-// --- helpers ---
+if (!$rol) { header("Location: ../login.php"); exit; }
+if (!$id)  { http_response_code(400); exit("Falta ID."); }
+
+// --- Helpers ---
 function json_out($arr){ header('Content-Type: application/json'); echo json_encode($arr); exit; }
 function badge($estado){
   $estado = strtolower($estado ?? '');
@@ -25,29 +33,34 @@ function badge($estado){
   ];
   return $map[$estado] ?? 'bg-gray-100 text-gray-700';
 }
-function norm_fecha($v){ // acepta YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY
+function norm_fecha($v){
   $v = trim((string)$v);
   if (!$v) return '';
   if (preg_match('/^\d{4}-\d{2}-\d{2}$/',$v)) return $v;
   if (preg_match('/^(\d{2})[\/-](\d{2})[\/-](\d{4})$/',$v,$m)) return sprintf('%04d-%02d-%02d',$m[3],$m[2],$m[1]);
   $ts = strtotime($v); return $ts?date('Y-m-d',$ts):'';
 }
-function norm_hora($v){
+// Acepta "HH:MM" o "HH:MM-HH:MM"
+function norm_slot($v){
   $v = trim((string)$v);
-  if (preg_match('/^(\d{1,2}):(\d{2})$/',$v,$m)) return sprintf('%02d:%02d',$m[1],$m[2]);
-  $ts = strtotime($v); return $ts?date('H:i',$ts):'';
+  if ($v === '') return '';
+  if (preg_match('/^\d{2}:\d{2}-\d{2}:\d{2}$/', $v)) return $v;
+  if (preg_match('/^(\d{1,2}):(\d{2})$/', $v, $m)) return sprintf('%02d:%02d', $m[1], $m[2]);
+  $ts = strtotime($v);
+  return $ts ? date('H:i', $ts) : '';
+}
+function label_slot($v){
+  $v = trim((string)$v);
+  if (preg_match('/^\d{2}:\d{2}-\d{2}:\d{2}$/', $v)) return $v;         // muestra el rango
+  if (preg_match('/^(\d{1,2}):(\d{2})$/', $v, $m)) return sprintf('%02d:%02d', $m[1], $m[2]);
+  return $v;
 }
 
-// --- seguridad básica ---
-if (!$id) { http_response_code(400); exit("Falta ID."); }
-if (!$rol) { header("Location: ../login.php"); exit; }
-
-// --- obtener reserva (incluye escenario/sala para filtrar horarios) ---
+// --- Cargar reserva ---
 $sql = "SELECT r.*,
                f.nombre AS facultad_nombre,
                e.nombre AS escuela_nombre,
-               r.escenario_id,
-               (SELECT s.id FROM escenarios ee JOIN salas s ON ee.sala_id=s.id WHERE ee.id=r.escenario_id LIMIT 1) AS sala_id
+               r.escenario_id
         FROM reservations r
         LEFT JOIN facultades f ON r.facultad_id=f.id
         LEFT JOIN escuelas   e ON r.escuela_id=e.id
@@ -59,14 +72,30 @@ $res = $stmt->get_result();
 $rv  = $res->fetch_assoc();
 if (!$rv) { http_response_code(404); exit("Reserva no encontrada."); }
 
-// --- autorización ---
+// --- Autorización ---
 $esPropia   = (strtolower($rv['nombre_usuario'] ?? '') === strtolower($usuario));
 $estadoLow  = strtolower($rv['estado'] ?? '');
 $puedeEditarDocente = ($rol === 'docente' && $esPropia && $estadoLow === 'pendiente');
 $puedeEditarAdmin   = ($rol === 'admin' || $rol === 'multimedia');
 $puedeEditar        = $puedeEditarAdmin || $puedeEditarDocente;
 
-// --- guardar (POST) ---
+// --- Recursos hardcode (igual que crear) ---
+$recursosOpciones = [
+  "Documentos PDF",
+  "Documento de Word",
+  "Libro de Excel",
+  "Videos",
+  "Presentación de PowerPoint",
+  "Presentación de programa",
+];
+
+// Normalización de recursos actuales
+$recursosActualesRaw = array_filter(array_map('trim', explode(',', (string)($rv['recursos'] ?? ''))));
+$recursosActualesL   = array_map('mb_strtolower', $recursosActualesRaw);
+$opcionesL           = array_map('mb_strtolower', $recursosOpciones);
+$recursosExtras      = array_values(array_diff($recursosActualesL, $opcionesL)); // preserva no listados
+
+// --- Guardar (POST) ---
 $isPost = ($_SERVER['REQUEST_METHOD'] === 'POST');
 $isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'fetch';
 
@@ -76,12 +105,15 @@ if ($isPost) {
     exit("No autorizado.");
   }
 
-  $fecha  = norm_fecha($_POST['fecha_reserva'] ?? '');
-  $hora   = norm_hora($_POST['hora_reserva'] ?? '');
-  $tema   = trim((string)($_POST['tema_video'] ?? ''));
-  // Si vienen recursos por IDs, convertirlos a nombres (cadena separada por coma)
-  $recurIds = $_POST['recursos_ids'] ?? null; // array
-  $recurTxt = trim((string)($_POST['recursos'] ?? '')); // fallback
+  // Acepta ambos nombres y también "rango|salaId"
+  $fechaInput = $_POST['fecha_reserva'] ?? $_POST['fecha'] ?? '';
+  $horaInput  = $_POST['hora_reserva']  ?? $_POST['bloque_sala'] ?? '';
+  // si viene "HH:MM-HH:MM|123", nos quedamos con la parte izquierda
+  if (strpos($horaInput, '|') !== false) $horaInput = explode('|', $horaInput, 2)[0];
+
+  $fecha = norm_fecha($fechaInput);
+  $hora  = norm_slot($horaInput);
+  $tema  = trim((string)($_POST['tema_video'] ?? $_POST['tema'] ?? ''));
 
   if (!$fecha || !$hora || $tema === '') {
     $msg = 'Campos inválidos. Revisa fecha, hora y tema.';
@@ -91,30 +123,28 @@ if ($isPost) {
     exit;
   }
 
-  // Si vienen recursos_ids, traducirlos a nombres
-  if (is_array($recurIds) && count($recurIds) > 0) {
-    $ids = array_map('intval', $recurIds);
-    $in  = implode(',', array_fill(0, count($ids), '?'));
-    $types = str_repeat('i', count($ids));
-    $q = $conn->prepare("SELECT nombre FROM recursos WHERE id IN ($in) ORDER BY nombre");
-    $q->bind_param($types, ...$ids);
-    $q->execute();
-    $rs = $q->get_result();
-    $nombres = [];
-    while ($r = $rs->fetch_assoc()) $nombres[] = trim($r['nombre']);
-    $recur = implode(', ', array_filter($nombres, fn($x)=>$x!==''));
-  } else {
-    // fallback: texto libre (por compatibilidad con versión anterior)
-    $recur = implode(', ', array_filter(array_map('trim', explode(',', $recurTxt)), fn($x)=>$x!==''));
-  }
+  // Recursos seleccionados + extras preservados
+  $seleccionados = isset($_POST['recursos']) && is_array($_POST['recursos'])
+    ? array_filter(array_map('trim', $_POST['recursos']))
+    : [];
+  $extrasTxt = trim((string)($_POST['recursos_extras'] ?? ''));
+  $extrasArr = $extrasTxt !== '' ? array_filter(array_map('trim', explode(',', $extrasTxt))) : [];
 
-  // Los docentes sólo pueden editar si está 'pendiente'
+  $all  = [];
+  $seen = [];
+  foreach (array_merge($seleccionados, $extrasArr) as $r) {
+    $k = mb_strtolower($r);
+    if (!isset($seen[$k])) { $seen[$k] = true; $all[] = $r; }
+  }
+  $recur = implode(', ', $all);
+
+  // Update (docente sólo si pendiente y propia)
   if ($puedeEditarDocente) {
     $upd = $conn->prepare("UPDATE reservations
                            SET fecha_reserva=?, hora_reserva=?, tema_video=?, recursos=?
                            WHERE id=? AND estado='pendiente' AND nombre_usuario=?");
     $upd->bind_param("ssssis", $fecha, $hora, $tema, $recur, $id, $usuario);
-  } else { // admin / multimedia
+  } else {
     $upd = $conn->prepare("UPDATE reservations
                            SET fecha_reserva=?, hora_reserva=?, tema_video=?, recursos=?
                            WHERE id=?");
@@ -129,7 +159,7 @@ if ($isPost) {
     exit;
   }
 
-  // devolver fila actualizada (para AJAX y para volver a pintar)
+  // Respuesta
   $stmt = $conn->prepare($sql);
   $stmt->bind_param("i", $id);
   $stmt->execute();
@@ -142,7 +172,7 @@ if ($isPost) {
       'fila' => [
         'id'            => (int)$fila['id'],
         'fecha_reserva' => $fila['fecha_reserva'],
-        'hora_reserva'  => substr($fila['hora_reserva'],0,5),
+        'hora_reserva'  => $fila['hora_reserva'],
         'tema_video'    => $fila['tema_video'],
         'recursos'      => $fila['recursos'] ?? '',
         'estado'        => $fila['estado'],
@@ -151,12 +181,9 @@ if ($isPost) {
   }
 
   $_SESSION['flash_ok'] = 'Cambios guardados correctamente.';
-  $dest = ($back === 'dashboard') ? '../admin/dashboard.php' : 'dashboard.php';
-  header("Location: $dest");
+  header("Location: ".($back==='dashboard' ? '../admin/dashboard.php' : 'dashboard.php'));
   exit;
 }
-
-// -------------------- HTML (GET) --------------------
 ?>
 <!doctype html>
 <html lang="es">
@@ -221,9 +248,8 @@ if ($isPost) {
         <input type="hidden" name="back"  value="<?= htmlspecialchars($back) ?>">
         <input type="hidden" name="vista" value="<?= htmlspecialchars($vista) ?>">
         <input type="hidden" name="fecha" value="<?= htmlspecialchars($fechaRet) ?>">
-
-        <!-- Para la carga de horarios -->
         <input type="hidden" id="escenario_id" value="<?= (int)($rv['escenario_id'] ?? 0) ?>">
+        <input type="hidden" id="reserva_id"   value="<?= (int)$rv['id'] ?>">
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
@@ -236,14 +262,24 @@ if ($isPost) {
 
           <div>
             <label class="block text-sm text-gray-600 mb-1">Sala / Hora</label>
-            <!-- Select controlado por AJAX (carga de horarios_disponibles.php) -->
-            <select name="hora_reserva" id="bloque_sala"
+
+            <!-- Select que recibe value "HH:MM-HH:MM|salaId" -->
+            <select name="bloque_sala" id="bloque_sala"
                     class="w-full h-11 rounded-lg border-gray-300 px-3 bg-white"
                     <?= $puedeEditar ? '' : 'disabled' ?> required>
-              <option value="<?= htmlspecialchars(substr($rv['hora_reserva'],0,5)) ?>">
-                <?= "Actual · ".htmlspecialchars(substr($rv['hora_reserva'],0,5)) ?>
+              <?php
+                $valorHoraActual = trim((string)$rv['hora_reserva']);    
+                $labelHoraActual = label_slot($valorHoraActual);
+              ?>
+              <option value="<?= htmlspecialchars($valorHoraActual) ?>">
+                <?= "Actual · ".htmlspecialchars($labelHoraActual) ?>
               </option>
             </select>
+
+           
+           <input type="hidden" name="hora_reserva" id="hora_hidden"
+                   value="<?= htmlspecialchars($valorHoraActual) ?>">
+
             <p class="text-xs text-gray-500 mt-1">* Se cargan opciones disponibles según la fecha elegida.</p>
           </div>
 
@@ -255,17 +291,30 @@ if ($isPost) {
                    <?= $puedeEditar ? '' : 'disabled' ?> required>
           </div>
 
-          <!-- Recursos desde BD (AJAX) -->
+       
           <div class="md:col-span-2">
             <label class="block text-sm text-gray-600 mb-2">Recursos</label>
-            <div id="recursosWrap" class="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
-              <!-- Aquí se llenan los checkboxes vía AJAX -->
+            <div class="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
+              <?php foreach ($recursosOpciones as $opt):
+                $checked = in_array(mb_strtolower($opt), $recursosActualesL, true) ? 'checked' : '';
+              ?>
+                <label class="flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+                  <input type="checkbox" name="recursos[]" value="<?= htmlspecialchars($opt) ?>"
+                         class="h-4 w-4 rounded border-gray-300"
+                         <?= $puedeEditar ? $checked : 'disabled' ?>>
+                  <span class="text-sm text-gray-700"><?= htmlspecialchars($opt) ?></span>
+                </label>
+              <?php endforeach; ?>
             </div>
-            <!-- Fallback oculto por compatibilidad si no hay JS -->
-            <textarea name="recursos" id="recursos_textarea" class="hidden"><?= htmlspecialchars($rv['recursos'] ?? '') ?></textarea>
 
-            <!-- Lista actual para preseleccionar (separado por coma) -->
-            <input type="hidden" id="recursos_actuales" value="<?= htmlspecialchars($rv['recursos'] ?? '') ?>">
+            <?php if (!empty($recursosExtras)): ?>
+              <p class="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 inline-block">
+                * Esta reserva incluye otros recursos no listados:
+                <strong><?= htmlspecialchars(implode(', ', $recursosExtras)) ?></strong>. Se conservarán.
+              </p>
+            <?php endif; ?>
+
+            <input type="hidden" name="recursos_extras" value="<?= htmlspecialchars(implode(', ', $recursosExtras)) ?>">
           </div>
         </div>
 
@@ -283,114 +332,78 @@ if ($isPost) {
         </div>
 
         <?php if ($puedeEditar): ?>
-        <p id="ed_msg" class="mt-2 text-sm text-gray-600 hidden"></p>
+          <p id="ed_msg" class="mt-2 text-sm text-gray-600 hidden"></p>
         <?php endif; ?>
       </form>
     </div>
   </div>
 
   <script>
-  // === Cargar horarios disponibles al elegir fecha (AJAX)
-  (function horarios(){
-    const fecha   = document.getElementById('fecha_reserva');
-    const select  = document.getElementById('bloque_sala');
-    const escId   = document.getElementById('escenario_id')?.value || '';
 
-    fecha?.addEventListener('change', async () => {
-      const value = fecha.value;
-      select.innerHTML = `<option value="">Cargando...</option>`;
-      if (!value) {
-        select.innerHTML = `<option value="">Selecciona una fecha primero</option>`;
-        return;
-      }
-      try {
-        const url = `horarios_disponibles.php?fecha=${encodeURIComponent(value)}${escId?`&escenario_id=${encodeURIComponent(escId)}`:''}`;
-        const res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' }});
-        if (!res.ok) throw new Error('HTTP '+res.status);
-        const data = await res.json(); // esperado: [{value,text},...]
-        if (Array.isArray(data) && data.length) {
-          select.innerHTML = `<option value=''>Selecciona una sala y hora</option>` +
-            data.map(item => `<option value="${item.value}">${item.text}</option>`).join('');
-        } else {
-          select.innerHTML = `<option value=''>No hay horarios disponibles para esta fecha</option>`;
-        }
-      } catch (err) {
-        console.error(err);
-        select.innerHTML = `<option value="">Error al cargar horarios</option>`;
-      }
-    });
-  })();
+(function syncHora(){
+  const sel  = document.getElementById('bloque_sala');
+  const hid  = document.getElementById('hora_hidden');
+  const form = document.getElementById('formEditar');
+  if (!sel || !hid || !form) return;
+  const onlyRange = (v) => String(v||'').split('|',2)[0];
+  const update = () => { hid.value = onlyRange(sel.value); };
+  update();
+  sel.addEventListener('change', update);
+  form.addEventListener('submit', update);
+})();
 
-  // === Cargar recursos desde la BD (AJAX) y preseleccionar los actuales ===
-  (function recursos(){
-    const wrap   = document.getElementById('recursosWrap');
-    const actuales = (document.getElementById('recursos_actuales')?.value || '')
-                      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+(function horarios(){
+  const fecha   = document.getElementById('fecha_reserva');
+  const select  = document.getElementById('bloque_sala');
+  if (!fecha || !select) return;
 
-    async function load() {
-      wrap.innerHTML = `
-        <div class="col-span-full flex items-center gap-2 text-sm text-gray-500">
-          <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" fill="currentColor"></path>
-          </svg>
-          Cargando recursos…
-        </div>`;
-      try {
-        const res = await fetch('api_recursos.php', { credentials:'same-origin', headers:{'X-Requested-With':'fetch'} });
-        if (!res.ok) throw new Error('HTTP '+res.status);
-        const data = await res.json(); // esperado: [{id,nombre}]
-        if (!Array.isArray(data) || !data.length) {
-          wrap.innerHTML = `<p class="text-sm text-gray-500">No hay recursos configurados.</p>`;
-          return;
-        }
-        wrap.innerHTML = data.map(r => {
-          const checked = actuales.includes(String(r.nombre).toLowerCase()) ? 'checked' : '';
-          return `
-          <label class="flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
-            <input type="checkbox" name="recursos_ids[]" value="${r.id}" ${checked}
-                   class="h-4 w-4 rounded border-gray-300">
-            <span class="text-sm text-gray-700">${r.nombre}</span>
-          </label>`;
-        }).join('');
-      } catch (err) {
-        console.error(err);
-        wrap.innerHTML = `<p class="text-sm text-rose-600">Error al cargar recursos.</p>`;
-      }
+  const horaActualVal   = select.querySelector('option')?.value || '';
+  const fechaOriginal   = fecha.value;
+
+  async function cargar(fechaYMD){
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaYMD)) {
+      select.innerHTML = `<option value="">Selecciona una fecha válida</option>`;
+      return;
     }
-    load();
-  })();
+    select.innerHTML = `<option value="">Cargando...</option>`;
+    try {
+      const url = `horarios_disponibles.php?fecha=${encodeURIComponent(fechaYMD)}`;
+      const res = await fetch(url, { credentials:'same-origin', headers:{'X-Requested-With':'fetch'} });
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      const data = await res.json(); 
 
-  // === Envío normal (no AJAX) también funciona; si quieres AJAX, envía con fetch:
-  (function handleSubmit(){
-    const form = document.getElementById('formEditar');
-    const msg  = document.getElementById('ed_msg');
-
-    // Si prefieres usar AJAX puro, descomenta esto:
-    /*
-    form?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      msg?.classList.add('hidden'); if (msg) msg.textContent = '';
-
-      const fd = new FormData(form);
-      try {
-        const resp = await fetch('editar_reserva.php', {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'fetch' },
-          body: fd
-        });
-        const data = await resp.json();
-        if (!resp.ok || !data?.ok) throw new Error(data?.error || 'No se pudo guardar');
-        // Aquí podrías cerrar modal y refrescar la lista en vivo si vienes desde un modal
-        msg.textContent = 'Guardado correctamente.';
-        msg.classList.remove('hidden');
-      } catch (err) {
-        msg.textContent = err.message || 'Error inesperado';
-        msg.classList.remove('hidden');
+      let html = '';
+      
+      if (fechaYMD === fechaOriginal && horaActualVal) {
+        const label = horaActualVal; 
+        html += `<option value="${horaActualVal}">Actual · ${label}</option>`;
+      } else {
+        html += `<option value="">Selecciona una sala y hora</option>`;
       }
-    });
-    */
-  })();
+
+      if (Array.isArray(data) && data.length) {
+        html += data.map(o => `<option value="${o.value}">${o.text}</option>`).join('');
+      } else if (data && data.error) {
+        html += `<option value="">${data.error}</option>`;
+      } else {
+        html += `<option value="">No hay horarios disponibles para esta fecha</option>`;
+      }
+
+      select.innerHTML = html;
+
+      
+      const firstVal = select.value || '';
+      document.getElementById('hora_hidden').value = String(firstVal).split('|',2)[0] || '';
+    } catch (err) {
+      console.error('Error horarios:', err);
+      select.innerHTML = `<option value="">Error al cargar horarios</option>`;
+    }
+  }
+
+  cargar(fecha.value);
+ 
+  fecha.addEventListener('change', () => cargar(fecha.value));
+})();
   </script>
 </body>
 </html>

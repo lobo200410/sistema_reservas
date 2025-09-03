@@ -42,7 +42,7 @@ $nombreCompleto = $_SESSION["nombre"];
 <body class="min-h-screen bg-gray-50 text-gray-900">
   <div class="flex min-h-screen">
 
-    <!-- Sidebar -->
+    
     <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-72 -translate-x-full md:translate-x-0 transition-transform duration-200 bg-white border-r border-gray-200 shadow-soft">
       <div class="h-full flex flex-col">
         <!-- Brand -->
