@@ -109,14 +109,29 @@ $nombreCompleto = $_SESSION["nombre"] ?? '';
             <span>PostGrabación</span>
           </a>
 
-          <a href="#" onclick="event.preventDefault(); cargarContenido('reportes')"
+          <a href="#" onclick="event.preventDefault(); cargarContenido('reporte_mensual')"
             class="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100">
             <span class="w-9 h-9 rounded-lg bg-gray-100 grid place-items-center text-gray-600 group-hover:bg-white group-hover:shadow">
               <i class="fa-solid fa-chart-column"></i>
             </span>
-            <span>Reportes</span>
+            <span>Reporte Mensual</span>
           </a>
 
+          <a href="#" onclick="event.preventDefault(); cargarContenido('reporte_rango')"
+            class="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100">
+            <span class="w-9 h-9 rounded-lg bg-gray-100 grid place-items-center text-gray-600 group-hover:bg-white group-hover:shadow">
+              <i class="fa-solid fa-chart-column"></i>
+            </span>
+            <span>Reporte por rango de fechas</span>
+          </a>
+
+          <a href="#" onclick="event.preventDefault(); cargarContenido('reporte_anual')"
+            class="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100">
+            <span class="w-9 h-9 rounded-lg bg-gray-100 grid place-items-center text-gray-600 group-hover:bg-white group-hover:shadow">
+              <i class="fa-solid fa-chart-column"></i>
+            </span>
+            <span>Reporte Anual</span>
+          </a>
 
           <a href="#" onclick="event.preventDefault(); cargarContenido('horas')"
             class="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100">
@@ -127,12 +142,12 @@ $nombreCompleto = $_SESSION["nombre"] ?? '';
           </a>
         </nav>
 
-        <!-- Logout -->
+
 
       </div>
     </aside>
 
-    <!-- Backdrop móvil -->
+
     <div id="sidebarBackdrop" class="fixed inset-0 z-30 hidden md:hidden bg-black/40"></div>
 
     <!-- Main -->
@@ -215,8 +230,11 @@ $nombreCompleto = $_SESSION["nombre"] ?? '';
     </main>
   </div>
 
+  <script src="js/jquery-3.7.1.min.js?v=1"></script>
   <!-- Tu JS de navegación (reutiliza el mismo app.js mejorado) -->
   <script src="js/app.js"></script>
+
+
 
   <!-- Interacciones mínimas del layout -->
   <script>
