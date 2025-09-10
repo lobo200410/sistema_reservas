@@ -1,5 +1,4 @@
 <?php
-// ------------------- PHP BOOTSTRAP -------------------
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -14,11 +13,10 @@ if (!isset($_SESSION["rol"]) || $_SESSION["rol"] !== "docente") {
 
 $id_usuario = (int)($_SESSION['usuario_id'] ?? 0);
 
-// Detectar si se está cargando como parcial (AJAX/fetch) o página completa
+
 $isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'fetch';
 
-// ------------------- DATA FROM DB -------------------
-// Docente (nombre y correo)
+
 $nombre_completo = $correo_usuario = '';
 $sql_usuario = "SELECT nombre, apellido, correo FROM users WHERE id = ?";
 $stmt = $conn->prepare($sql_usuario);
@@ -100,7 +98,7 @@ if (!$isAjax): ?>
   <main class="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
 <?php endif; ?>
 
-  <!-- --------------- FORMULARIO --------------- -->
+  
   <div class="rounded-2xl bg-white border border-gray-200 shadow p-5 sm:p-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-lg font-semibold">
@@ -244,7 +242,7 @@ if (!$isAjax): ?>
         </div>
       </section>
 
-      <!-- Fecha y hora -->
+      
       <section>
         <h4 class="text-sm font-semibold text-gray-600 mb-3">Fecha y hora de grabación</h4>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -271,14 +269,14 @@ if (!$isAjax): ?>
         </button>
       </div>
 
-      <!-- Hidden código materia (si viene por POST o prefill JS) -->
+     
       <input type="hidden" name="codigo_materia" value="<?= htmlspecialchars($codigo_materia) ?>">
     </form>
   </div>
 
-  <!-- --------------- SCRIPTS --------------- -->
+
   <script>
-    // Prefill desde openReserva(...) si se cargó dentro del dashboard
+   
     (function prefill(){
       if (window.__prefillReserva) {
         const f = document.getElementById('formReserva');
